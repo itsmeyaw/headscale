@@ -583,6 +583,8 @@ func (h *Headscale) Serve() error {
 	h.mapBatcher.Start()
 	defer h.mapBatcher.Close()
 
+	h.revalidateOIDCUsers()
+
 	if h.cfg.DERP.ServerEnabled {
 		// When embedded DERP is enabled we always need a STUN server
 		if h.cfg.DERP.STUNAddr == "" {

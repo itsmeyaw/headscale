@@ -47,6 +47,7 @@ var (
 	errOIDCIssuerInsecure        = errors.New("oidc.issuer must use https (http is only allowed for loopback hosts)")
 	errOIDCClientIDRequired      = errors.New("oidc.client_id is required when oidc.issuer is set")
 	errOIDCClientSecretRequired  = errors.New("oidc.client_secret or oidc.client_secret_path is required when oidc.issuer is set")
+	errSSHCheckMaxAgeInvalid     = errors.New("oidc.ssh_check_max_age must be 0 or at least 1s, e.g. 5m")
 	errServerURLSuffix           = errors.New("server_url cannot be part of base_domain in a way that could make the DERP and headscale server unreachable")
 	errServerURLSame             = errors.New("server_url cannot use the same domain as base_domain in a way that could make the DERP and headscale server unreachable")
 	errInvalidPKCEMethod         = errors.New("pkce.method must be either 'plain' or 'S256'")
@@ -380,6 +381,8 @@ type OIDCConfig struct {
 	AllowedHostedDomains       []string
 	EmailVerifiedRequired      bool
 	UseExpiryFromToken         bool
+	SSHCheckMaxAge             time.Duration
+	RevalidateUsers            bool
 	PKCE                       PKCEConfig
 }
 
@@ -548,6 +551,10 @@ func validateOIDCConfig() error {
 		return errOIDCClientSecretRequired
 	}
 
+	if maxAge := viper.GetDuration("oidc.ssh_check_max_age"); maxAge != 0 && maxAge < time.Second {
+		return errSSHCheckMaxAgeInvalid
+	}
+
 	return nil
 }
 
@@ -627,6 +634,7 @@ func LoadConfig(path string, isFile bool) error {
 	viper.SetDefault("oidc.scope", []string{oidc.ScopeOpenID, "profile", "email"})
 	viper.SetDefault("oidc.only_start_if_oidc_is_available", true)
 	viper.SetDefault("oidc.use_expiry_from_token", false)
+	viper.SetDefault("oidc.revalidate_users", false)
 	viper.SetDefault("oidc.pkce.enabled", false)
 	viper.SetDefault("oidc.pkce.method", "S256")
 	viper.SetDefault("oidc.email_verified_required", true)
@@ -1744,6 +1752,8 @@ func LoadServerConfig() (*Config, error) {
 			AllowedHostedDomains:  viper.GetStringSlice("oidc.allowed_hosted_domains"),
 			EmailVerifiedRequired: viper.GetBool("oidc.email_verified_required"),
 			UseExpiryFromToken:    viper.GetBool("oidc.use_expiry_from_token"),
+			SSHCheckMaxAge:        viper.GetDuration("oidc.ssh_check_max_age"),
+			RevalidateUsers:       viper.GetBool("oidc.revalidate_users"),
 			PKCE: PKCEConfig{
 				Enabled: viper.GetBool("oidc.pkce.enabled"),
 				Method:  viper.GetString("oidc.pkce.method"),

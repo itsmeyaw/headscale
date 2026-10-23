@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/juanfont/headscale/hscontrol/types"
 	"github.com/juanfont/headscale/hscontrol/types/change"
 	"github.com/juanfont/headscale/hscontrol/util"
+	"github.com/juanfont/headscale/hscontrol/util/zlog/zf"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/oauth2"
 	"tailscale.com/util/rands"
@@ -43,6 +45,11 @@ const (
 )
 
 var errOIDCStateTooShort = errors.New("oidc state parameter is too short")
+
+var errOIDCAuthTimeStale = errors.New("ID token auth_time is missing or older than oidc.ssh_check_max_age")
+
+// authTimeClaimsParam requests auth_time in the ID token (OIDC Core §5.5).
+const authTimeClaimsParam = `{"id_token":{"auth_time":{"essential":true}}}`
 
 var (
 	errEmptyOIDCCallbackParams = errors.New("empty OIDC callback params")
@@ -214,9 +221,20 @@ func (a *AuthProviderOIDC) authHandler(
 		}
 	}
 
+	sshCheckMaxAge := !registration && a.cfg.SSHCheckMaxAge > 0
+	if sshCheckMaxAge {
+		// Google only returns auth_time when asked for via the claims parameter.
+		// Set before extra_params: an override that drops it fails closed.
+		extras = append(extras, oauth2.SetAuthURLParam("claims", authTimeClaimsParam))
+	}
+
 	// Add any extra parameters from configuration
 	for k, v := range a.cfg.ExtraParams {
 		extras = append(extras, oauth2.SetAuthURLParam(k, v))
+	}
+
+	if sshCheckMaxAge {
+		extras = append(extras, oauth2.SetAuthURLParam("max_age", strconv.Itoa(int(a.cfg.SSHCheckMaxAge.Seconds()))))
 	}
 
 	extras = append(extras, oidc.Nonce(nonce))
@@ -370,6 +388,26 @@ func (a *AuthProviderOIDC) OIDCCallbackHandler(
 		return
 	}
 
+	if a.cfg.SSHCheckMaxAge > 0 {
+		var authTimeClaim struct {
+			AuthTime float64 `json:"auth_time"`
+		}
+		if err := idToken.Claims(&authTimeClaim); err != nil { //nolint:noinlineerr
+			httpUserError(writer, NewHTTPError(http.StatusUnauthorized, "auth time not verifiable", err))
+
+			return
+		}
+
+		authTime := time.Unix(int64(authTimeClaim.AuthTime), 0)
+
+		err = checkAuthTime(authTime, a.cfg.SSHCheckMaxAge, time.Now())
+		if err != nil {
+			httpUserError(writer, NewHTTPError(http.StatusUnauthorized, "re-authentication required", err))
+
+			return
+		}
+	}
+
 	// If this is not a registration callback, then it is an SSH
 	// check-mode auth callback. Confirm the OIDC identity is the owner
 	// of the SSH source node before recording approval; without this
@@ -451,6 +489,16 @@ func (a *AuthProviderOIDC) OIDCCallbackHandler(
 func (a *AuthProviderOIDC) determineNodeExpiry(idTokenExpiration time.Time) *time.Time {
 	if a.cfg.UseExpiryFromToken {
 		return &idTokenExpiration
+	}
+
+	return nil
+}
+
+// checkAuthTime rejects an authentication that is older than maxAge. A zero
+// authTime (no auth_time claim) is always stale.
+func checkAuthTime(authTime time.Time, maxAge time.Duration, now time.Time) error {
+	if authTime.IsZero() || now.Sub(authTime) > maxAge {
+		return errOIDCAuthTimeStale
 	}
 
 	return nil
@@ -638,6 +686,72 @@ func doOIDCAuthorization(
 	}
 
 	return nil
+}
+
+// revalidateOIDCUsers re-checks the stored email of each OIDC user against
+// oidc.allowed_domains and oidc.allowed_users, which are otherwise only
+// evaluated at login. Groups and hosted domains are not stored, so they are
+// not re-checked. With oidc.revalidate_users, untagged nodes of users that
+// no longer pass are expired.
+func (h *Headscale) revalidateOIDCUsers() {
+	cfg := h.cfg.OIDC
+	if cfg.Issuer == "" || (len(cfg.AllowedDomains) == 0 && len(cfg.AllowedUsers) == 0) {
+		return
+	}
+
+	// email_verified is not stored, so the email filters are checked as trusted.
+	emailCfg := &types.OIDCConfig{
+		AllowedDomains:        cfg.AllowedDomains,
+		AllowedUsers:          cfg.AllowedUsers,
+		EmailVerifiedRequired: false,
+	}
+
+	users, err := h.state.ListAllUsers()
+	if err != nil {
+		log.Error().Err(err).Msg("listing users for OIDC revalidation")
+
+		return
+	}
+
+	for _, user := range users {
+		if user.Provider != util.RegisterMethodOIDC {
+			continue
+		}
+
+		authErr := doOIDCAuthorization(emailCfg, &types.OIDCClaims{Email: user.Email})
+		if authErr == nil {
+			continue
+		}
+
+		log.Warn().
+			EmbedObject(&user).
+			Err(authErr).
+			Msg("OIDC user no longer passes oidc.allowed_domains or oidc.allowed_users")
+
+		if !cfg.RevalidateUsers {
+			continue
+		}
+
+		for _, node := range h.state.ListNodesByUser(types.UserID(user.ID)).All() {
+			if node.IsTagged() || node.IsExpired() {
+				continue
+			}
+
+			now := time.Now()
+			_, nodeChange, expErr := h.state.SetNodeExpiry(node.ID(), &now)
+			h.Change(nodeChange)
+
+			if expErr != nil {
+				log.Error().Err(expErr).Uint64(zf.NodeID, node.ID().Uint64()).
+					Msg("expiring node of OIDC user that no longer passes filters")
+
+				continue
+			}
+
+			log.Info().Uint64(zf.NodeID, node.ID().Uint64()).EmbedObject(&user).
+				Msg("expired node of OIDC user that no longer passes filters")
+		}
+	}
 }
 
 // getAuthInfoFromState retrieves and consumes the auth info for a state. The

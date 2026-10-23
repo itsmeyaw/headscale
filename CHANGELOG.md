@@ -149,6 +149,8 @@ the ACME DNS-01 challenge through a built-in DNS provider: `acmedns`,
 - A policy write builds the peer map once instead of twice [#3557](https://github.com/juanfont/headscale/pull/3557)
 - Speed up the peer map build on large tailnets: each node's matchers are found once instead of checking every pair of nodes against every rule [#3556](https://github.com/juanfont/headscale/pull/3556)
 - Add `oidc.allowed_hosted_domains` to restrict OIDC logins to Google Workspace domains by checking the `hd` claim, which `oidc.allowed_domains` (email domain) does not enforce
+- Add `oidc.ssh_check_max_age` to make SSH check approvals require a fresh IdP login: the auth request carries `max_age` and asks for `auth_time`, which must be within the duration. With Google, `auth_time` has to be enabled in the OAuth client settings
+- Add `oidc.revalidate_users` to re-check stored emails against `oidc.allowed_domains` and `oidc.allowed_users` at startup, expiring the nodes of users who no longer pass; filters are otherwise only evaluated at login
 
 ## 0.29.5 (2026-10-13)
 

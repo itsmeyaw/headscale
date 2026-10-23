@@ -432,6 +432,13 @@ unix_socket_permission: "0770"
 #   # OIDC-authenticated nodes.
 #   use_expiry_from_token: false
 #
+#   # Require the identity provider to re-authenticate the user for SSH check
+#   # approvals (sent as max_age), and reject approvals whose ID token auth_time
+#   # is older than this. Set a duration with a unit, e.g. 5m; minimum 1s. 0
+#   # disables the check. Google only returns auth_time when it is enabled in
+#   # the OAuth client settings.
+#   ssh_check_max_age: 0
+#
 #   # The OIDC scopes to use, defaults to "openid", "profile" and "email".
 #   # Custom scopes can be configured as needed, be sure to always include the
 #   # required "openid" scope.
@@ -465,6 +472,11 @@ unix_socket_permission: "0770"
 #   # of the allowed_hosted_domains list. Users without an hd claim are rejected.
 #   allowed_hosted_domains:
 #     - example.com
+#
+#   # Re-check the stored email of every OIDC user against allowed_domains and
+#   # allowed_users at startup. Users who no longer pass have their untagged nodes
+#   # expired; otherwise they are only logged. Groups are not re-checked.
+#   revalidate_users: false
 #
 #   # Optional: PKCE (Proof Key for Code Exchange) configuration
 #   # PKCE adds an additional layer of security to the OAuth 2.0 authorization code flow

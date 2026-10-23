@@ -143,6 +143,17 @@ are configured, a user needs to pass all of them.
         - "example.com"
     ```
 
+Filters are evaluated at login only. Changing `allowed_domains` or `allowed_users` does not affect users who already
+joined. Set `revalidate_users: true` to re-check the stored email address of every OIDC user against `allowed_domains` and
+`allowed_users` at startup. Nodes of users who no longer pass are expired, while tagged nodes are left alone. Without
+`revalidate_users`, the same users are only logged as a warning. Groups and hosted domains are not stored and are not
+re-checked. Restart headscale after changing the filters.
+
+```yaml
+oidc:
+  revalidate_users: true
+```
+
 ### Control email verification
 
 Headscale uses the `email` claim from the identity provider to synchronize the email address to its user profile. By
@@ -192,6 +203,29 @@ reauthenticate. The default node expiration can be configured via the top-level 
     ```console
     headscale node expire -i <NODE_ID>
     ```
+
+### Require re-authentication for SSH check
+
+When an SSH rule uses `"action": "check"`, the identity provider approves the check with the user's existing session. Set
+`ssh_check_max_age` to ask the identity provider for a fresh login (`max_age`) and the `auth_time` claim (via the
+`claims` request parameter), and reject the check unless the ID token carries an `auth_time` no older than that duration.
+The value is a duration with a unit, such as `5m`, and the minimum is `1s`. The default `0` disables the check.
+
+```yaml hl_lines="5"
+oidc:
+  issuer: "https://sso.example.com"
+  client_id: "headscale"
+  client_secret: "generated-secret"
+  ssh_check_max_age: 5m
+```
+
+!!! warning "Google"
+
+    Google returns `auth_time` only when it is
+    [enabled in the settings](https://developers.google.com/identity/openid-connect/openid-connect#an-id-tokens-payload)
+    of your OAuth client; without it every SSH check is rejected. Google does not document `max_age`, so it may not
+    prompt for a fresh login: a user whose Google session is older than `ssh_check_max_age` is rejected and has to sign
+    in to Google again.
 
 ### Reference a user in the policy
 
