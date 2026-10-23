@@ -125,6 +125,23 @@ are configured, a user needs to pass all of them.
         - "headscale_users"
     ```
 
+=== "Allowed hosted domains"
+
+    - Use the Google Workspace `hd` (hosted domain) claim of each authenticating user and only authorize users whose
+      hosted domain matches the list. Users without an `hd` claim, such as personal Google accounts, are rejected.
+    - A verified email address is not required for this check.
+    - Access allowed: users of the `example.com` Google Workspace
+    - Access denied: users of `example.net` Google Workspace, users without a hosted domain
+
+    ```yaml hl_lines="5-6"
+    oidc:
+      issuer: "https://accounts.google.com"
+      client_id: "headscale"
+      client_secret: "generated-secret"
+      allowed_hosted_domains:
+        - "example.com"
+    ```
+
 ### Control email verification
 
 Headscale uses the `email` claim from the identity provider to synchronize the email address to its user profile. By
@@ -241,6 +258,7 @@ endpoint.
 | profile picture     | `picture`            | URL to a profile picture or avatar                                                                |
 | provider identifier | `iss`, `sub`         | A stable and unique identifier for a user, typically a combination of `iss` and `sub` OIDC claims |
 |                     | `groups`             | [Only used to filter for allowed groups](#authorize-users-with-filters)                           |
+|                     | `hd`                 | [Only used to filter for allowed hosted domains](#authorize-users-with-filters)                   |
 
 ## Limitations
 
@@ -297,6 +315,12 @@ users authenticate who are outside of your domain. If you only need to authentic
 
 However if you don't have a domain, or need to add users outside of your domain, you can manually add emails via Google
 Console.
+
+!!! note "Restrict Google sign-ins to your Workspace with `allowed_hosted_domains`"
+
+    `allowed_domains` only checks the email domain, and `extra_params: {hd: ...}` only adds a hint to the login page.
+    Neither stops users from other Google accounts. To restrict access to a Google Workspace tenant, set
+    [`allowed_hosted_domains`](#authorize-users-with-filters) to the Workspace domain, which checks the `hd` claim.
 
 #### Steps
 

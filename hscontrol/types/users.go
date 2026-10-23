@@ -311,6 +311,9 @@ type OIDCClaims struct {
 	EmailVerified     FlexibleBoolean     `json:"email_verified,omitempty"`
 	ProfilePictureURL string              `json:"picture,omitempty"`
 	Username          string              `json:"preferred_username,omitempty"`
+	// HostedDomain is the Google Workspace domain (hd claim). Only taken from
+	// the ID token, never merged from userinfo.
+	HostedDomain string `json:"hd,omitempty"`
 }
 
 // Identifier returns a unique identifier string combining the [OIDCClaims.Iss] and [OIDCClaims.Sub] claims.

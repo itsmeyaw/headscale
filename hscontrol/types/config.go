@@ -375,6 +375,7 @@ type OIDCConfig struct {
 	AllowedDomains             []string
 	AllowedUsers               []string
 	AllowedGroups              []string
+	AllowedHostedDomains       []string
 	EmailVerifiedRequired      bool
 	UseExpiryFromToken         bool
 	PKCE                       PKCEConfig
@@ -1724,6 +1725,7 @@ func LoadServerConfig() (*Config, error) {
 			AllowedDomains:        viper.GetStringSlice("oidc.allowed_domains"),
 			AllowedUsers:          viper.GetStringSlice("oidc.allowed_users"),
 			AllowedGroups:         viper.GetStringSlice("oidc.allowed_groups"),
+			AllowedHostedDomains:  viper.GetStringSlice("oidc.allowed_hosted_domains"),
 			EmailVerifiedRequired: viper.GetBool("oidc.email_verified_required"),
 			UseExpiryFromToken:    viper.GetBool("oidc.use_expiry_from_token"),
 			PKCE: PKCEConfig{

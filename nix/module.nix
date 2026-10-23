@@ -545,6 +545,17 @@ in
                 example = [ "alice@example.com" ];
               };
 
+              allowed_hosted_domains = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [ ];
+                description = ''
+                  Allowed Google Workspace hosted domains (the `hd` claim). If an
+                  authenticated user's hosted domain is not in this list, or the
+                  claim is absent, authentication request will be rejected.
+                '';
+                example = [ "example.com" ];
+              };
+
               pkce = {
                 enabled = lib.mkOption {
                   type = lib.types.bool;

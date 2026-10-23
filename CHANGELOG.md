@@ -147,6 +147,7 @@ the ACME DNS-01 challenge through a built-in DNS provider: `acmedns`,
 - Fix the unix socket being created `0700` instead of the documented `0770` when `unix_socket_permission` is unset. The socket grants full admin access without authentication, so members of its group gain that access; check who is in it before upgrading [#3540](https://github.com/juanfont/headscale/pull/3540)
 - A policy write builds the peer map once instead of twice [#3557](https://github.com/juanfont/headscale/pull/3557)
 - Speed up the peer map build on large tailnets: each node's matchers are found once instead of checking every pair of nodes against every rule [#3556](https://github.com/juanfont/headscale/pull/3556)
+- Add `oidc.allowed_hosted_domains` to restrict OIDC logins to Google Workspace domains by checking the `hd` claim, which `oidc.allowed_domains` (email domain) does not enforce
 
 ## 0.29.5 (2026-10-13)
 

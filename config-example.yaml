@@ -461,6 +461,11 @@ unix_socket_permission: "0770"
 #   allowed_groups:
 #     - /headscale
 #
+#   # Only accept users whose Google Workspace hosted domain (hd claim) is part
+#   # of the allowed_hosted_domains list. Users without an hd claim are rejected.
+#   allowed_hosted_domains:
+#     - example.com
+#
 #   # Optional: PKCE (Proof Key for Code Exchange) configuration
 #   # PKCE adds an additional layer of security to the OAuth 2.0 authorization code flow
 #   # by preventing authorization code interception attacks
