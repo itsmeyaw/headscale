@@ -143,6 +143,17 @@ are configured, a user needs to pass all of them.
         - "example.com"
     ```
 
+Filters are evaluated at login only. Changing `allowed_domains` or `allowed_users` does not affect users who already
+joined. Set `revalidate_users: true` to re-check the stored email address of every OIDC user against `allowed_domains` and
+`allowed_users` at startup. Nodes of users who no longer pass are expired, while tagged nodes are left alone. Without
+`revalidate_users`, the same users are only logged as a warning. Groups and hosted domains are not stored and are not
+re-checked. Restart headscale after changing the filters.
+
+```yaml
+oidc:
+  revalidate_users: true
+```
+
 ### Control email verification
 
 Headscale uses the `email` claim from the identity provider to synchronize the email address to its user profile. By

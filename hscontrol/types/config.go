@@ -382,6 +382,7 @@ type OIDCConfig struct {
 	EmailVerifiedRequired      bool
 	UseExpiryFromToken         bool
 	SSHCheckMaxAge             time.Duration
+	RevalidateUsers            bool
 	PKCE                       PKCEConfig
 }
 
@@ -633,6 +634,7 @@ func LoadConfig(path string, isFile bool) error {
 	viper.SetDefault("oidc.scope", []string{oidc.ScopeOpenID, "profile", "email"})
 	viper.SetDefault("oidc.only_start_if_oidc_is_available", true)
 	viper.SetDefault("oidc.use_expiry_from_token", false)
+	viper.SetDefault("oidc.revalidate_users", false)
 	viper.SetDefault("oidc.pkce.enabled", false)
 	viper.SetDefault("oidc.pkce.method", "S256")
 	viper.SetDefault("oidc.email_verified_required", true)
@@ -1751,6 +1753,7 @@ func LoadServerConfig() (*Config, error) {
 			EmailVerifiedRequired: viper.GetBool("oidc.email_verified_required"),
 			UseExpiryFromToken:    viper.GetBool("oidc.use_expiry_from_token"),
 			SSHCheckMaxAge:        viper.GetDuration("oidc.ssh_check_max_age"),
+			RevalidateUsers:       viper.GetBool("oidc.revalidate_users"),
 			PKCE: PKCEConfig{
 				Enabled: viper.GetBool("oidc.pkce.enabled"),
 				Method:  viper.GetString("oidc.pkce.method"),

@@ -20,6 +20,7 @@ import (
 	"github.com/juanfont/headscale/hscontrol/types"
 	"github.com/juanfont/headscale/hscontrol/types/change"
 	"github.com/juanfont/headscale/hscontrol/util"
+	"github.com/juanfont/headscale/hscontrol/util/zlog/zf"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/oauth2"
 	"tailscale.com/util/rands"
@@ -685,6 +686,72 @@ func doOIDCAuthorization(
 	}
 
 	return nil
+}
+
+// revalidateOIDCUsers re-checks the stored email of each OIDC user against
+// oidc.allowed_domains and oidc.allowed_users, which are otherwise only
+// evaluated at login. Groups and hosted domains are not stored, so they are
+// not re-checked. With oidc.revalidate_users, untagged nodes of users that
+// no longer pass are expired.
+func (h *Headscale) revalidateOIDCUsers() {
+	cfg := h.cfg.OIDC
+	if cfg.Issuer == "" || (len(cfg.AllowedDomains) == 0 && len(cfg.AllowedUsers) == 0) {
+		return
+	}
+
+	// email_verified is not stored, so the email filters are checked as trusted.
+	emailCfg := &types.OIDCConfig{
+		AllowedDomains:        cfg.AllowedDomains,
+		AllowedUsers:          cfg.AllowedUsers,
+		EmailVerifiedRequired: false,
+	}
+
+	users, err := h.state.ListAllUsers()
+	if err != nil {
+		log.Error().Err(err).Msg("listing users for OIDC revalidation")
+
+		return
+	}
+
+	for _, user := range users {
+		if user.Provider != util.RegisterMethodOIDC {
+			continue
+		}
+
+		authErr := doOIDCAuthorization(emailCfg, &types.OIDCClaims{Email: user.Email})
+		if authErr == nil {
+			continue
+		}
+
+		log.Warn().
+			EmbedObject(&user).
+			Err(authErr).
+			Msg("OIDC user no longer passes oidc.allowed_domains or oidc.allowed_users")
+
+		if !cfg.RevalidateUsers {
+			continue
+		}
+
+		for _, node := range h.state.ListNodesByUser(types.UserID(user.ID)).All() {
+			if node.IsTagged() || node.IsExpired() {
+				continue
+			}
+
+			now := time.Now()
+			_, nodeChange, expErr := h.state.SetNodeExpiry(node.ID(), &now)
+			h.Change(nodeChange)
+
+			if expErr != nil {
+				log.Error().Err(expErr).Uint64(zf.NodeID, node.ID().Uint64()).
+					Msg("expiring node of OIDC user that no longer passes filters")
+
+				continue
+			}
+
+			log.Info().Uint64(zf.NodeID, node.ID().Uint64()).EmbedObject(&user).
+				Msg("expired node of OIDC user that no longer passes filters")
+		}
+	}
 }
 
 // getAuthInfoFromState retrieves and consumes the auth info for a state. The

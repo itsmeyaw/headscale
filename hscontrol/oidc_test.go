@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/juanfont/headscale/hscontrol/types"
+	"github.com/juanfont/headscale/hscontrol/util"
 	"github.com/oauth2-proxy/mockoidc"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -230,6 +231,66 @@ func TestDoOIDCAuthorization(t *testing.T) {
 			if ((err != nil) && !tC.wantErr) || ((err == nil) && tC.wantErr) {
 				t.Errorf("bad authorization: %s > want=%v | got=%v", tC.name, tC.wantErr, err)
 			}
+		})
+	}
+}
+
+func TestRevalidateOIDCUsers(t *testing.T) {
+	tests := []struct {
+		name       string
+		revalidate bool
+		expired    bool
+	}{
+		{name: "expires untagged node of failing user", revalidate: true, expired: true},
+		{name: "leaves failing user alone when disabled", revalidate: false, expired: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := createTestApp(t)
+			app.cfg.OIDC = types.OIDCConfig{
+				Issuer:          "https://idp.example.com",
+				AllowedDomains:  []string{"allowed.example"},
+				RevalidateUsers: tt.revalidate,
+			}
+
+			newUser := func(name, email, provider string) *types.User {
+				u, _, err := app.state.CreateUser(types.User{Name: name, Email: email, Provider: provider})
+				require.NoError(t, err)
+
+				return u
+			}
+
+			newNode := func(user *types.User, hostname string, tags ...string) types.NodeID {
+				node := app.state.CreateRegisteredNodeForTest(user, hostname)
+				node.User = user
+				node.Tags = tags
+
+				return app.state.PutNodeInStoreForTest(*node).ID()
+			}
+
+			failing := newUser("failing", "eve@other.example", util.RegisterMethodOIDC)
+			passing := newUser("passing", "ok@allowed.example", util.RegisterMethodOIDC)
+			local := newUser("local", "eve@other.example", "")
+
+			failingNode := newNode(failing, "failing-node")
+			failingTagged := newNode(failing, "failing-tagged", "tag:server")
+			passingNode := newNode(passing, "passing-node")
+			localNode := newNode(local, "local-node")
+
+			app.revalidateOIDCUsers()
+
+			hasExpiry := func(id types.NodeID) bool {
+				v, ok := app.state.GetNodeByID(id)
+				require.True(t, ok)
+
+				return v.Expiry().Valid()
+			}
+
+			assert.Equal(t, tt.expired, hasExpiry(failingNode), "failing user's untagged node")
+			assert.False(t, hasExpiry(failingTagged), "tagged node must not be expired")
+			assert.False(t, hasExpiry(passingNode), "passing user's node must not be expired")
+			assert.False(t, hasExpiry(localNode), "non-OIDC user must not be checked")
 		})
 	}
 }
