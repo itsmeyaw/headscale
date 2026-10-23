@@ -482,7 +482,7 @@ in
                 type = lib.types.str;
                 default = "";
                 description = ''
-                  URL to OpenID issuer.
+                  URL to OpenID issuer. Must use https.
                 '';
                 example = "https://openid.example.com";
               };

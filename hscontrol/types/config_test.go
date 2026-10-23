@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"tailscale.com/envknob"
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/dnstype"
 )
@@ -475,6 +476,38 @@ func TestOIDCConfigValidation(t *testing.T) {
 			wantErr: "valid http(s) URL",
 		},
 		{
+			name: "http issuer on non-loopback host",
+			oidcBlock: `
+  issuer: http://idp.example.com
+  client_id: headscale
+  client_secret: sekret`,
+			wantErr: "must use https",
+		},
+		{
+			name: "http issuer on loopback IPv4",
+			oidcBlock: `
+  issuer: http://127.0.0.1:8080/oidc
+  client_id: headscale
+  client_secret: sekret`,
+			wantErr: "",
+		},
+		{
+			name: "http issuer on localhost",
+			oidcBlock: `
+  issuer: http://localhost:8080
+  client_id: headscale
+  client_secret: sekret`,
+			wantErr: "",
+		},
+		{
+			name: "http issuer on loopback IPv6",
+			oidcBlock: `
+  issuer: http://[::1]:8080
+  client_id: headscale
+  client_secret: sekret`,
+			wantErr: "",
+		},
+		{
 			name: "missing client_id",
 			oidcBlock: `
   issuer: https://idp.example.com
@@ -526,6 +559,31 @@ oidc:` + tt.oidcBlock + "\n")
 			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
+}
+
+func TestOIDCInsecureIssuerDebugKnob(t *testing.T) {
+	envknob.Setenv("HEADSCALE_DEBUG_OIDC_ALLOW_INSECURE_ISSUER", "1")
+	t.Cleanup(func() { envknob.Setenv("HEADSCALE_DEBUG_OIDC_ALLOW_INSECURE_ISSUER", "") })
+
+	tmpDir := t.TempDir()
+	configYaml := []byte(`---
+noise:
+  private_key_path: noise_private.key
+server_url: http://127.0.0.1:8080
+dns:
+  magic_dns: false
+  override_local_dns: false
+database:
+  type: sqlite
+oidc:
+  issuer: http://idp.example.com
+  client_id: headscale
+  client_secret: sekret
+`)
+
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "config.yaml"), configYaml, 0o600))
+	require.NoError(t, LoadConfig(tmpDir, false))
+	require.NoError(t, validateServerConfig())
 }
 
 func TestTLSACMEListenAddrCollision(t *testing.T) {
