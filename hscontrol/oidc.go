@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +44,11 @@ const (
 )
 
 var errOIDCStateTooShort = errors.New("oidc state parameter is too short")
+
+var errOIDCAuthTimeStale = errors.New("ID token auth_time is missing or older than oidc.ssh_check_max_age")
+
+// authTimeClaimsParam requests auth_time in the ID token (OIDC Core §5.5).
+const authTimeClaimsParam = `{"id_token":{"auth_time":{"essential":true}}}`
 
 var (
 	errEmptyOIDCCallbackParams = errors.New("empty OIDC callback params")
@@ -214,9 +220,20 @@ func (a *AuthProviderOIDC) authHandler(
 		}
 	}
 
+	sshCheckMaxAge := !registration && a.cfg.SSHCheckMaxAge > 0
+	if sshCheckMaxAge {
+		// Google only returns auth_time when asked for via the claims parameter.
+		// Set before extra_params: an override that drops it fails closed.
+		extras = append(extras, oauth2.SetAuthURLParam("claims", authTimeClaimsParam))
+	}
+
 	// Add any extra parameters from configuration
 	for k, v := range a.cfg.ExtraParams {
 		extras = append(extras, oauth2.SetAuthURLParam(k, v))
+	}
+
+	if sshCheckMaxAge {
+		extras = append(extras, oauth2.SetAuthURLParam("max_age", strconv.Itoa(int(a.cfg.SSHCheckMaxAge.Seconds()))))
 	}
 
 	extras = append(extras, oidc.Nonce(nonce))
@@ -370,6 +387,26 @@ func (a *AuthProviderOIDC) OIDCCallbackHandler(
 		return
 	}
 
+	if a.cfg.SSHCheckMaxAge > 0 {
+		var authTimeClaim struct {
+			AuthTime float64 `json:"auth_time"`
+		}
+		if err := idToken.Claims(&authTimeClaim); err != nil { //nolint:noinlineerr
+			httpUserError(writer, NewHTTPError(http.StatusUnauthorized, "auth time not verifiable", err))
+
+			return
+		}
+
+		authTime := time.Unix(int64(authTimeClaim.AuthTime), 0)
+
+		err = checkAuthTime(authTime, a.cfg.SSHCheckMaxAge, time.Now())
+		if err != nil {
+			httpUserError(writer, NewHTTPError(http.StatusUnauthorized, "re-authentication required", err))
+
+			return
+		}
+	}
+
 	// If this is not a registration callback, then it is an SSH
 	// check-mode auth callback. Confirm the OIDC identity is the owner
 	// of the SSH source node before recording approval; without this
@@ -451,6 +488,16 @@ func (a *AuthProviderOIDC) OIDCCallbackHandler(
 func (a *AuthProviderOIDC) determineNodeExpiry(idTokenExpiration time.Time) *time.Time {
 	if a.cfg.UseExpiryFromToken {
 		return &idTokenExpiration
+	}
+
+	return nil
+}
+
+// checkAuthTime rejects an authentication that is older than maxAge. A zero
+// authTime (no auth_time claim) is always stale.
+func checkAuthTime(authTime time.Time, maxAge time.Duration, now time.Time) error {
+	if authTime.IsZero() || now.Sub(authTime) > maxAge {
+		return errOIDCAuthTimeStale
 	}
 
 	return nil

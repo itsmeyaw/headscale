@@ -47,6 +47,7 @@ var (
 	errOIDCIssuerInsecure        = errors.New("oidc.issuer must use https (http is only allowed for loopback hosts)")
 	errOIDCClientIDRequired      = errors.New("oidc.client_id is required when oidc.issuer is set")
 	errOIDCClientSecretRequired  = errors.New("oidc.client_secret or oidc.client_secret_path is required when oidc.issuer is set")
+	errSSHCheckMaxAgeInvalid     = errors.New("oidc.ssh_check_max_age must be 0 or at least 1s, e.g. 5m")
 	errServerURLSuffix           = errors.New("server_url cannot be part of base_domain in a way that could make the DERP and headscale server unreachable")
 	errServerURLSame             = errors.New("server_url cannot use the same domain as base_domain in a way that could make the DERP and headscale server unreachable")
 	errInvalidPKCEMethod         = errors.New("pkce.method must be either 'plain' or 'S256'")
@@ -380,6 +381,7 @@ type OIDCConfig struct {
 	AllowedHostedDomains       []string
 	EmailVerifiedRequired      bool
 	UseExpiryFromToken         bool
+	SSHCheckMaxAge             time.Duration
 	PKCE                       PKCEConfig
 }
 
@@ -546,6 +548,10 @@ func validateOIDCConfig() error {
 
 	if viper.GetString("oidc.client_secret") == "" && viper.GetString("oidc.client_secret_path") == "" {
 		return errOIDCClientSecretRequired
+	}
+
+	if maxAge := viper.GetDuration("oidc.ssh_check_max_age"); maxAge != 0 && maxAge < time.Second {
+		return errSSHCheckMaxAgeInvalid
 	}
 
 	return nil
@@ -1744,6 +1750,7 @@ func LoadServerConfig() (*Config, error) {
 			AllowedHostedDomains:  viper.GetStringSlice("oidc.allowed_hosted_domains"),
 			EmailVerifiedRequired: viper.GetBool("oidc.email_verified_required"),
 			UseExpiryFromToken:    viper.GetBool("oidc.use_expiry_from_token"),
+			SSHCheckMaxAge:        viper.GetDuration("oidc.ssh_check_max_age"),
 			PKCE: PKCEConfig{
 				Enabled: viper.GetBool("oidc.pkce.enabled"),
 				Method:  viper.GetString("oidc.pkce.method"),

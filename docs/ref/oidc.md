@@ -193,6 +193,29 @@ reauthenticate. The default node expiration can be configured via the top-level 
     headscale node expire -i <NODE_ID>
     ```
 
+### Require re-authentication for SSH check
+
+When an SSH rule uses `"action": "check"`, the identity provider approves the check with the user's existing session. Set
+`ssh_check_max_age` to ask the identity provider for a fresh login (`max_age`) and the `auth_time` claim (via the
+`claims` request parameter), and reject the check unless the ID token carries an `auth_time` no older than that duration.
+The value is a duration with a unit, such as `5m`, and the minimum is `1s`. The default `0` disables the check.
+
+```yaml hl_lines="5"
+oidc:
+  issuer: "https://sso.example.com"
+  client_id: "headscale"
+  client_secret: "generated-secret"
+  ssh_check_max_age: 5m
+```
+
+!!! warning "Google"
+
+    Google returns `auth_time` only when it is
+    [enabled in the settings](https://developers.google.com/identity/openid-connect/openid-connect#an-id-tokens-payload)
+    of your OAuth client; without it every SSH check is rejected. Google does not document `max_age`, so it may not
+    prompt for a fresh login: a user whose Google session is older than `ssh_check_max_age` is rejected and has to sign
+    in to Google again.
+
 ### Reference a user in the policy
 
 You may refer to users in the Headscale policy via:

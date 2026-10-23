@@ -11,11 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/juanfont/headscale/hscontrol/types"
 	"github.com/oauth2-proxy/mockoidc"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/oauth2"
 	"tailscale.com/types/key"
 )
 
@@ -321,6 +323,122 @@ func TestSetCSRFCookieSecure(t *testing.T) {
 		"plain-http server_url without req.TLS must not set Secure")
 }
 
+// TestCheckAuthTime pins the SSH check-mode freshness rule: an auth_time older
+// than the configured max age, or a missing one, must not approve the check.
+func TestCheckAuthTime(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	maxAge := 5 * time.Minute
+
+	require.NoError(t, checkAuthTime(now.Add(-time.Minute), maxAge, now))
+	require.ErrorIs(t, checkAuthTime(now.Add(-10*time.Minute), maxAge, now), errOIDCAuthTimeStale)
+	require.ErrorIs(t, checkAuthTime(time.Time{}, maxAge, now), errOIDCAuthTimeStale)
+}
+
+// TestAuthURLCarriesMaxAgeOnlyForSSHCheck asserts the SSH check-mode auth URL
+// asks the IdP for max_age, while the node registration URL does not.
+func TestAuthURLCarriesMaxAgeOnlyForSSHCheck(t *testing.T) {
+	a := &AuthProviderOIDC{
+		serverURL: "http://hs.example.com",
+		cfg:       &types.OIDCConfig{SSHCheckMaxAge: 5 * time.Minute},
+		authCache: expirable.NewLRU[string, AuthInfo](16, nil, time.Minute),
+		oauth2Config: &oauth2.Config{
+			ClientID:    "client",
+			Endpoint:    oauth2.Endpoint{AuthURL: "https://idp.example.com/authorize"},
+			RedirectURL: oidcCallbackURL("http://hs.example.com"),
+		},
+	}
+
+	router := chi.NewRouter()
+	router.Get("/auth/{auth_id}", a.AuthHandler)
+	router.Get("/register/{auth_id}", a.RegisterHandler)
+
+	locationOf := func(path string) *url.URL {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+		require.Equal(t, http.StatusFound, rec.Code)
+
+		loc, err := url.Parse(rec.Header().Get("Location"))
+		require.NoError(t, err)
+
+		return loc
+	}
+
+	sshCheck := locationOf("/auth/" + types.MustAuthID().String())
+	assert.Equal(t, "300", sshCheck.Query().Get("max_age"))
+	assert.JSONEq(t, authTimeClaimsParam, sshCheck.Query().Get("claims"))
+
+	registration := locationOf("/register/" + types.MustAuthID().String())
+	assert.False(t, registration.Query().Has("max_age"))
+	assert.False(t, registration.Query().Has("claims"))
+}
+
+// TestSSHCheckCallbackRequiresFreshAuthTime drives a real SSH check
+// approval through the browser: /auth/{id} to the IdP and back to the
+// callback. mockoidc issues ID tokens without auth_time, so a configured
+// max age must refuse the approval, while the zero (disabled) control
+// lets the same flow approve the check for the node's owner.
+func TestSSHCheckCallbackRequiresFreshAuthTime(t *testing.T) {
+	tests := []struct {
+		name       string
+		maxAge     time.Duration
+		wantStatus int
+		wantResult bool
+	}{
+		{
+			name:       "max age set rejects missing auth_time",
+			maxAge:     5 * time.Minute,
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "max age disabled approves",
+			maxAge:     0,
+			wantStatus: http.StatusOK,
+			wantResult: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := newOIDCBrowser(t, func(cfg *types.OIDCConfig) {
+				cfg.SSHCheckMaxAge = tt.maxAge
+			})
+
+			// A registration login creates the OIDC user that owns the src node.
+			_, registerURL := b.pendingNode(t)
+			status, _, _ := b.get(t, registerURL)
+			require.Equal(t, http.StatusOK, status)
+
+			users, err := b.app.state.ListAllUsers()
+			require.NoError(t, err)
+			require.Len(t, users, 1)
+
+			src := b.app.state.CreateRegisteredNodeForTest(&users[0], "ssh-src")
+			b.app.state.PutNodeInStoreForTest(*src)
+			dst := b.app.state.CreateRegisteredNodeForTest(&users[0], "ssh-dst")
+
+			authID := types.MustAuthID()
+			b.app.state.SetAuthCacheEntry(authID, types.NewSSHCheckAuthRequest(src.ID, dst.ID))
+
+			authReq, ok := b.app.state.GetAuthCacheEntry(authID)
+			require.True(t, ok)
+
+			status, _, _ = b.get(t, b.publicURL+"/auth/"+authID.String())
+			require.Equal(t, tt.wantStatus, status)
+
+			approved := false
+
+			select {
+			case <-authReq.WaitForAuth():
+				approved = true
+			default:
+			}
+
+			assert.Equal(t, tt.wantResult, approved,
+				"the SSH check must be approved only when the callback accepts it")
+		})
+	}
+}
+
 // oidcBrowser drives the interactive OIDC registration flow the way a
 // browser does: over real HTTP against the real route table, through a
 // cookie jar that honours Path and expiry, following redirects.
@@ -337,13 +455,13 @@ type oidcBrowser struct {
 	client    *http.Client
 }
 
-func newOIDCBrowser(t *testing.T) *oidcBrowser {
+func newOIDCBrowser(t *testing.T, tweak ...func(*types.OIDCConfig)) *oidcBrowser {
 	t.Helper()
 
-	return newOIDCBrowserWithPrefix(t, "")
+	return newOIDCBrowserWithPrefix(t, "", tweak...)
 }
 
-func newOIDCBrowserWithPrefix(t *testing.T, prefix string) *oidcBrowser {
+func newOIDCBrowserWithPrefix(t *testing.T, prefix string, tweak ...func(*types.OIDCConfig)) *oidcBrowser {
 	t.Helper()
 
 	idp, err := mockoidc.Run()
@@ -371,16 +489,21 @@ func newOIDCBrowserWithPrefix(t *testing.T, prefix string) *oidcBrowser {
 	t.Cleanup(srv.Close)
 	publicURL := srv.URL + prefix
 
+	cfg := &types.OIDCConfig{
+		Issuer:       idp.Issuer(),
+		ClientID:     idp.ClientID,
+		ClientSecret: idp.ClientSecret,
+		Scope:        []string{"openid", "profile", "email"},
+	}
+	for _, apply := range tweak {
+		apply(cfg)
+	}
+
 	provider, err := NewAuthProviderOIDC(
 		context.Background(),
 		app,
 		publicURL,
-		&types.OIDCConfig{
-			Issuer:       idp.Issuer(),
-			ClientID:     idp.ClientID,
-			ClientSecret: idp.ClientSecret,
-			Scope:        []string{"openid", "profile", "email"},
-		},
+		cfg,
 	)
 	require.NoError(t, err)
 

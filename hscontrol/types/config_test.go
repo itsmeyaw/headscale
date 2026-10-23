@@ -529,6 +529,51 @@ func TestOIDCConfigValidation(t *testing.T) {
   client_secret: sekret`,
 			wantErr: "",
 		},
+		{
+			name: "ssh_check_max_age negative",
+			oidcBlock: `
+  issuer: https://idp.example.com
+  client_id: headscale
+  client_secret: sekret
+  ssh_check_max_age: -1s`,
+			wantErr: "ssh_check_max_age must be 0 or at least 1s",
+		},
+		{
+			name: "ssh_check_max_age sub-second",
+			oidcBlock: `
+  issuer: https://idp.example.com
+  client_id: headscale
+  client_secret: sekret
+  ssh_check_max_age: 500ms`,
+			wantErr: "ssh_check_max_age must be 0 or at least 1s",
+		},
+		{
+			name: "ssh_check_max_age bare integer read as nanoseconds",
+			oidcBlock: `
+  issuer: https://idp.example.com
+  client_id: headscale
+  client_secret: sekret
+  ssh_check_max_age: 300`,
+			wantErr: "ssh_check_max_age must be 0 or at least 1s",
+		},
+		{
+			name: "ssh_check_max_age zero disables",
+			oidcBlock: `
+  issuer: https://idp.example.com
+  client_id: headscale
+  client_secret: sekret
+  ssh_check_max_age: 0`,
+			wantErr: "",
+		},
+		{
+			name: "ssh_check_max_age five minutes",
+			oidcBlock: `
+  issuer: https://idp.example.com
+  client_id: headscale
+  client_secret: sekret
+  ssh_check_max_age: 5m`,
+			wantErr: "",
+		},
 	}
 
 	for _, tt := range tests {
