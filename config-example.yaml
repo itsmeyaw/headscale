@@ -411,7 +411,7 @@ unix_socket_permission: "0770"
 #   # Block startup until the identity provider is available and healthy.
 #   only_start_if_oidc_is_available: true
 #
-#   # OpenID Connect Issuer URL from the identity provider
+#   # OpenID Connect Issuer URL from the identity provider. Must use https.
 #   issuer: "https://your-oidc.issuer.com/path"
 #
 #   # Client ID from the identity provider
@@ -460,6 +460,11 @@ unix_socket_permission: "0770"
 #   # allowed_groups list.
 #   allowed_groups:
 #     - /headscale
+#
+#   # Only accept users whose Google Workspace hosted domain (hd claim) is part
+#   # of the allowed_hosted_domains list. Users without an hd claim are rejected.
+#   allowed_hosted_domains:
+#     - example.com
 #
 #   # Optional: PKCE (Proof Key for Code Exchange) configuration
 #   # PKCE adds an additional layer of security to the OAuth 2.0 authorization code flow

@@ -482,7 +482,7 @@ in
                 type = lib.types.str;
                 default = "";
                 description = ''
-                  URL to OpenID issuer.
+                  URL to OpenID issuer. Must use https.
                 '';
                 example = "https://openid.example.com";
               };
@@ -543,6 +543,17 @@ in
                   Users allowed to authenticate even if not in allowedDomains.
                 '';
                 example = [ "alice@example.com" ];
+              };
+
+              allowed_hosted_domains = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [ ];
+                description = ''
+                  Allowed Google Workspace hosted domains (the `hd` claim). If an
+                  authenticated user's hosted domain is not in this list, or the
+                  claim is absent, authentication request will be rejected.
+                '';
+                example = [ "example.com" ];
               };
 
               pkce = {

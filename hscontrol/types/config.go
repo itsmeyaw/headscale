@@ -24,6 +24,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 	"go4.org/netipx"
+	"tailscale.com/envknob"
 	"tailscale.com/net/tsaddr"
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/dnstype"
@@ -43,6 +44,7 @@ const (
 var (
 	errOidcMutuallyExclusive     = errors.New("oidc_client_secret and oidc_client_secret_path are mutually exclusive")
 	errOIDCIssuerInvalid         = errors.New("oidc.issuer must be a valid http(s) URL")
+	errOIDCIssuerInsecure        = errors.New("oidc.issuer must use https (http is only allowed for loopback hosts)")
 	errOIDCClientIDRequired      = errors.New("oidc.client_id is required when oidc.issuer is set")
 	errOIDCClientSecretRequired  = errors.New("oidc.client_secret or oidc.client_secret_path is required when oidc.issuer is set")
 	errServerURLSuffix           = errors.New("server_url cannot be part of base_domain in a way that could make the DERP and headscale server unreachable")
@@ -375,6 +377,7 @@ type OIDCConfig struct {
 	AllowedDomains             []string
 	AllowedUsers               []string
 	AllowedGroups              []string
+	AllowedHostedDomains       []string
 	EmailVerifiedRequired      bool
 	UseExpiryFromToken         bool
 	PKCE                       PKCEConfig
@@ -521,6 +524,20 @@ func validateOIDCConfig() error {
 	u, err := url.Parse(issuer)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
 		return fmt.Errorf("%w: got %q", errOIDCIssuerInvalid, issuer)
+	}
+
+	if u.Scheme == "http" {
+		host := u.Hostname()
+		addr, _ := netip.ParseAddr(host)
+
+		if host != "localhost" && !addr.IsLoopback() {
+			// Test-only escape hatch: the integration mock IdP serves http on a Docker network.
+			if !envknob.Bool("HEADSCALE_DEBUG_OIDC_ALLOW_INSECURE_ISSUER") {
+				return fmt.Errorf("%w: got %q", errOIDCIssuerInsecure, issuer)
+			}
+
+			log.Warn().Str("issuer", issuer).Msg("oidc.issuer uses http on a non-loopback host, allowed by HEADSCALE_DEBUG_OIDC_ALLOW_INSECURE_ISSUER")
+		}
 	}
 
 	if viper.GetString("oidc.client_id") == "" {
@@ -1724,6 +1741,7 @@ func LoadServerConfig() (*Config, error) {
 			AllowedDomains:        viper.GetStringSlice("oidc.allowed_domains"),
 			AllowedUsers:          viper.GetStringSlice("oidc.allowed_users"),
 			AllowedGroups:         viper.GetStringSlice("oidc.allowed_groups"),
+			AllowedHostedDomains:  viper.GetStringSlice("oidc.allowed_hosted_domains"),
 			EmailVerifiedRequired: viper.GetBool("oidc.email_verified_required"),
 			UseExpiryFromToken:    viper.GetBool("oidc.use_expiry_from_token"),
 			PKCE: PKCEConfig{

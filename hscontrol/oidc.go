@@ -51,8 +51,11 @@ var (
 	errOIDCAllowedDomains      = errors.New(
 		"authenticated principal does not match any allowed domain",
 	)
-	errOIDCAllowedGroups = errors.New("authenticated principal is not in any allowed group")
-	errOIDCAllowedUsers  = errors.New(
+	errOIDCAllowedGroups        = errors.New("authenticated principal is not in any allowed group")
+	errOIDCAllowedHostedDomains = errors.New(
+		"authenticated principal is not in any allowed hosted domain",
+	)
+	errOIDCAllowedUsers = errors.New(
 		"authenticated principal does not match any allowed user",
 	)
 	errOIDCUnverifiedEmail = errors.New("authenticated principal has an unverified email")
@@ -537,6 +540,19 @@ func validateOIDCAllowedDomains(
 	return nil
 }
 
+// validateOIDCAllowedHostedDomains checks that the Google Workspace hd claim
+// matches one of AllowedHostedDomains. A missing hd claim is rejected.
+func validateOIDCAllowedHostedDomains(
+	allowedHostedDomains []string,
+	claims *types.OIDCClaims,
+) error {
+	if claims.HostedDomain == "" || !slices.Contains(allowedHostedDomains, claims.HostedDomain) {
+		return NewHTTPError(http.StatusUnauthorized, "unauthorised hosted domain", errOIDCAllowedHostedDomains)
+	}
+
+	return nil
+}
+
 // validateOIDCAllowedGroups checks if AllowedGroups is provided,
 // and that the user has one group in the list.
 // claims.Groups can be populated by adding a client scope named
@@ -572,6 +588,7 @@ func validateOIDCAllowedUsers(
 // The following tests are always applied:
 //
 // - [validateOIDCAllowedGroups]
+// - [validateOIDCAllowedHostedDomains] (if cfg.AllowedHostedDomains is set)
 //
 // The following tests are applied if cfg.EmailVerifiedRequired=false
 // or claims.email_verified=true:
@@ -587,6 +604,13 @@ func doOIDCAuthorization(
 ) error {
 	if len(cfg.AllowedGroups) > 0 {
 		err := validateOIDCAllowedGroups(cfg.AllowedGroups, claims)
+		if err != nil {
+			return err
+		}
+	}
+
+	if len(cfg.AllowedHostedDomains) > 0 {
+		err := validateOIDCAllowedHostedDomains(cfg.AllowedHostedDomains, claims)
 		if err != nil {
 			return err
 		}

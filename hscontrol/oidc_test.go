@@ -173,6 +173,53 @@ func TestDoOIDCAuthorization(t *testing.T) {
 			},
 			claims: &types.OIDCClaims{Groups: []string{"group2"}},
 		},
+		{
+			name:    "allowed hosted domain matches",
+			wantErr: false,
+			cfg: &types.OIDCConfig{
+				EmailVerifiedRequired: true,
+				AllowedHostedDomains:  []string{"example.com"},
+			},
+			claims: &types.OIDCClaims{HostedDomain: "example.com", Email: "user@example.com"},
+		},
+		{
+			name:    "allowed hosted domain mismatch",
+			wantErr: true,
+			cfg: &types.OIDCConfig{
+				EmailVerifiedRequired: true,
+				AllowedHostedDomains:  []string{"example.com"},
+			},
+			claims: &types.OIDCClaims{HostedDomain: "other.com", Email: "user@other.com"},
+		},
+		{
+			name:    "allowed hosted domain missing hd claim",
+			wantErr: true,
+			cfg: &types.OIDCConfig{
+				EmailVerifiedRequired: true,
+				AllowedHostedDomains:  []string{"example.com"},
+			},
+			claims: &types.OIDCClaims{Email: "user@example.com", EmailVerified: true},
+		},
+		{
+			name:    "allowed hosted domain and allowed domain both match",
+			wantErr: false,
+			cfg: &types.OIDCConfig{
+				EmailVerifiedRequired: true,
+				AllowedDomains:        []string{"example.com"},
+				AllowedHostedDomains:  []string{"example.com"},
+			},
+			claims: &types.OIDCClaims{HostedDomain: "example.com", Email: "user@example.com", EmailVerified: true},
+		},
+		{
+			name:    "allowed hosted domain matches but allowed domain does not",
+			wantErr: true,
+			cfg: &types.OIDCConfig{
+				EmailVerifiedRequired: true,
+				AllowedDomains:        []string{"test.com"},
+				AllowedHostedDomains:  []string{"example.com"},
+			},
+			claims: &types.OIDCClaims{HostedDomain: "example.com", Email: "user@example.com", EmailVerified: true},
+		},
 	}
 
 	for _, tC := range testCases {
